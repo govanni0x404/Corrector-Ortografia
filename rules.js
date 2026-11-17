@@ -90,6 +90,19 @@ var CorrectorRules = (() => {
     return out;
   }
 
+  // Conectores que, al inicio de una oración, suelen llevar coma después.
+  const CONECTORES = [
+    "sin embargo", "no obstante", "por lo tanto", "por tanto",
+    "por consiguiente", "es decir", "o sea", "por ejemplo",
+    "por otro lado", "por otra parte", "en cambio",
+    "en primer lugar", "en segundo lugar", "en tercer lugar",
+    "en resumen", "en conclusión", "en definitiva", "en efecto",
+    "en realidad", "de hecho", "ahora bien", "además", "asimismo",
+    "por cierto", "por último", "finalmente", "mientras tanto",
+    "dicho esto", "aun así", "de todas formas", "de todos modos",
+    "por lo visto"
+  ];
+
   const PATRONES = [
     {
       re: /(?<=\S) +([,;])/g,
@@ -143,6 +156,18 @@ var CorrectorRules = (() => {
         length: m[0].length,
         message: "Antes de ‘pero’ suele ir una coma.",
         replacements: [{ value: ", pero" }]
+      })
+    },
+    {
+      re: new RegExp(
+        "(?<=(?:^|[.!?\\n])\\s*)(" + CONECTORES.join("|") + ")(?=\\s+\\p{L})",
+        "giu"
+      ),
+      hacer: (m) => ({
+        offset: m.index,
+        length: m[0].length,
+        message: "Después de ‘" + m[0] + "’ suele ir una coma.",
+        replacements: [{ value: m[0] + "," }]
       })
     }
   ];
