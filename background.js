@@ -2,7 +2,7 @@ const LT_URL = "http://localhost:8010/v2/check";
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === "check") {
-    const body = new URLSearchParams({ language: "es", text: msg.text });
+    const body = new URLSearchParams({ language: "es", level: "picky", text: msg.text });
     fetch(LT_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },

@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "1.1.2";
+  const VERSION = "1.2.0";
   const DEBOUNCE_MS = 600;
   const MAX_SUGGESTIONS = 5;
   const MAX_CHARS = 20000;
@@ -305,7 +305,7 @@
         }
         lastEl = el;
         lastText = text;
-        render(el, text, resp.matches);
+        render(el, text, typeof CorrectorRules !== "undefined" ? CorrectorRules.merge(text, resp.matches) : resp.matches);
       });
     } catch (e) {
       // pasa cuando se recarga la extensión y la página quedó con la versión vieja
