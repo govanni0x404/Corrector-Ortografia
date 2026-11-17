@@ -1,20 +1,26 @@
 (() => {
   "use strict";
 
-  const VERSION = "1.0.0";
+  const VERSION = "1.1.1";
   const DEBOUNCE_MS = 600;
   const MAX_SUGGESTIONS = 5;
+  const MAX_CHARS = 20000;
+  const PANEL_W = 320;
 
   let timer = null;
   let reqId = 0;
   let host = null;
+  let lastEl = null;
+  let lastText = "";
   const els = {};
+
+  /* ---------- Panel ---------- */
 
   function ensurePanel() {
     if (host) return;
     host = document.createElement("div");
     host.style.cssText =
-      "all:initial;position:fixed;right:16px;bottom:16px;z-index:2147483647;display:block;";
+      "all:initial;position:fixed;z-index:2147483647;display:block;";
     const shadow = host.attachShadow({ mode: "open" });
     shadow.innerHTML = `
       <style>
@@ -36,7 +42,9 @@
         <div class="foot">v${VERSION}</div>
       </div>`;
     els.body = shadow.querySelector(".body");
-    shadow.querySelector(".close").addEventListener("click", hidePanel);
+    const closeBtn = shadow.querySelector(".close");
+    closeBtn.addEventListener("mousedown", (e) => e.preventDefault());
+    closeBtn.addEventListener("click", hidePanel);
     document.documentElement.appendChild(host);
   }
 
@@ -44,13 +52,35 @@
     if (host) host.style.display = "none";
   }
 
-  function showPanel() {
-    ensurePanel();
-    host.style.display = "block";
+  function positionPanel(el) {
+    const r = el.getBoundingClientRect();
+    const margin = 8;
+    const left = Math.max(
+      margin,
+      Math.min(r.left, window.innerWidth - PANEL_W - margin)
+    );
+    host.style.left = left + "px";
+    host.style.right = "auto";
+    if (r.top > 360) {
+      // hay espacio arriba de la caja: el panel va encima
+      host.style.top = "auto";
+      host.style.bottom = window.innerHeight - r.top + margin + "px";
+    } else {
+      // poco espacio arriba: el panel va debajo
+      host.style.bottom = "auto";
+      host.style.top =
+        Math.min(r.bottom + margin, window.innerHeight - 120) + "px";
+    }
   }
 
-  function showMessage(text, cls) {
-    showPanel();
+  function showPanel(el) {
+    ensurePanel();
+    host.style.display = "block";
+    if (el) positionPanel(el);
+  }
+
+  function showMessage(el, text, cls) {
+    showPanel(el);
     els.body.textContent = "";
     const p = document.createElement("div");
     p.textContent = text;
@@ -58,13 +88,88 @@
     els.body.appendChild(p);
   }
 
-  function isTextField(el) {
-    if (!el || !el.tagName) return false;
-    if (el.tagName === "TEXTAREA") return true;
-    if (el.tagName === "INPUT") {
-      return ["text", "search"].includes((el.type || "").toLowerCase());
+  /* ---------- Detectar y leer campos de texto ---------- */
+
+  function getField(target) {
+    let node = target;
+    if (node && node.nodeType === 3) node = node.parentElement;
+    if (!node || node.nodeType !== 1) return null;
+    if (node.tagName === "TEXTAREA") return node;
+    if (node.tagName === "INPUT") {
+      return ["text", "search"].includes((node.type || "").toLowerCase())
+        ? node
+        : null;
     }
-    return false;
+    if (node.isContentEditable) {
+      // subir hasta la caja editable "madre"
+      while (node.parentElement && node.parentElement.isContentEditable) {
+        node = node.parentElement;
+      }
+      return node;
+    }
+    return null;
+  }
+
+  function isEditableDiv(el) {
+    return el.tagName !== "TEXTAREA" && el.tagName !== "INPUT";
+  }
+
+  const BLOCK_TAGS = new Set([
+    "DIV", "P", "LI", "UL", "OL", "H1", "H2", "H3", "H4", "H5", "H6",
+    "BLOCKQUOTE", "PRE", "TR"
+  ]);
+
+  // Recorre la caja y arma el texto, recordando en qué nodo vive cada pedazo.
+  function extractContent(root) {
+    const segs = [];
+    let text = "";
+
+    function addNewline() {
+      if (text.length && !text.endsWith("\n")) text += "\n";
+    }
+
+    function walk(node) {
+      if (node.nodeType === 3) {
+        const t = node.nodeValue;
+        if (t.length) {
+          segs.push({ node, start: text.length, len: t.length });
+          text += t;
+        }
+        return;
+      }
+      if (node.nodeType !== 1) return;
+      if (node.tagName === "BR") {
+        text += "\n";
+        return;
+      }
+      const block = BLOCK_TAGS.has(node.tagName);
+      if (block) addNewline();
+      for (const c of node.childNodes) walk(c);
+      if (block) addNewline();
+    }
+
+    walk(root);
+    return { text, segs };
+  }
+
+  function readField(el) {
+    if (isEditableDiv(el)) {
+      const { text, segs } = extractContent(el);
+      return { text: text.slice(0, MAX_CHARS), segs };
+    }
+    return { text: el.value.slice(0, MAX_CHARS), segs: null };
+  }
+
+  /* ---------- Aplicar una corrección ---------- */
+
+  function pointAt(segs, pos, isEnd) {
+    for (const s of segs) {
+      const dentro = isEnd
+        ? pos > s.start && pos <= s.start + s.len
+        : pos >= s.start && pos < s.start + s.len;
+      if (dentro) return { node: s.node, offset: pos - s.start };
+    }
+    return null;
   }
 
   function setValue(el, value) {
@@ -81,11 +186,41 @@
   }
 
   function applyFix(el, offset, length, word, replacement) {
+    const now = readField(el);
     // Si el texto cambió desde que se revisó, se vuelve a revisar y no se toca nada.
-    if (el.value.substr(offset, length) !== word) {
+    if (now.text.substr(offset, length) !== word) {
       check(el);
       return;
     }
+
+    if (now.segs) {
+      // Caja contenteditable
+      const a = pointAt(now.segs, offset, false);
+      const b = pointAt(now.segs, offset + length, true);
+      if (!a || !b) {
+        check(el);
+        return;
+      }
+      el.focus();
+      const range = document.createRange();
+      range.setStart(a.node, a.offset);
+      range.setEnd(b.node, b.offset);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      let ok = false;
+      try {
+        ok = document.execCommand("insertText", false, replacement);
+      } catch (e) {}
+      if (!ok) {
+        range.deleteContents();
+        range.insertNode(document.createTextNode(replacement));
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      return;
+    }
+
+    // textarea / input
     const nuevo =
       el.value.slice(0, offset) + replacement + el.value.slice(offset + length);
     setValue(el, nuevo);
@@ -96,12 +231,14 @@
     } catch (e) {}
   }
 
+  /* ---------- Mostrar resultados ---------- */
+
   function render(el, text, matches) {
     if (!matches.length) {
-      showMessage("✔ Sin errores", "ok");
+      hidePanel();
       return;
     }
-    showPanel();
+    showPanel(el);
     els.body.textContent = "";
     for (const m of matches) {
       const word = text.substr(m.offset, m.length);
@@ -110,7 +247,7 @@
 
       const w = document.createElement("span");
       w.className = "word";
-      w.textContent = word;
+      w.textContent = word.trim() ? word : "(espacio)";
 
       const msg = document.createElement("div");
       msg.className = "msg";
@@ -122,6 +259,8 @@
         const b = document.createElement("button");
         b.className = "sug";
         b.textContent = r.value;
+        // evita que el clic le quite el foco a la caja de texto
+        b.addEventListener("mousedown", (e) => e.preventDefault());
         b.addEventListener("click", () =>
           applyFix(el, m.offset, m.length, word, r.value)
         );
@@ -131,36 +270,65 @@
     }
   }
 
+  /* ---------- Revisar ---------- */
+
   function check(el) {
-    const text = el.value;
+    const { text } = readField(el);
     if (!text.trim()) {
+      lastEl = el;
+      lastText = "";
       hidePanel();
       return;
     }
+    if (el === lastEl && text === lastText) return; // nada nuevo que revisar
+
     const id = ++reqId;
-    chrome.runtime.sendMessage({ type: "check", text }, (resp) => {
-      if (chrome.runtime.lastError) {
-        showMessage("Error: " + chrome.runtime.lastError.message);
-        return;
-      }
-      if (id !== reqId) return; // llegó una respuesta vieja, se ignora
-      if (!resp || !resp.ok) {
-        showMessage(
-          "No pude hablar con LanguageTool. ¿Está encendido el contenedor?"
-        );
-        return;
-      }
-      render(el, text, resp.matches);
-    });
+    try {
+      chrome.runtime.sendMessage({ type: "check", text }, (resp) => {
+        if (chrome.runtime.lastError) {
+          lastText = "";
+          showMessage(el, "Error: " + chrome.runtime.lastError.message);
+          return;
+        }
+        if (id !== reqId) return; // llegó una respuesta vieja, se ignora
+        if (!resp || !resp.ok) {
+          lastText = "";
+          showMessage(
+            el,
+            "No pude hablar con LanguageTool. ¿Está encendido el contenedor?"
+          );
+          return;
+        }
+        lastEl = el;
+        lastText = text;
+        render(el, text, resp.matches);
+      });
+    } catch (e) {
+      // pasa cuando se recarga la extensión y la página quedó con la versión vieja
+      showMessage(el, "La extensión se actualizó. Recarga esta página (F5).");
+    }
+  }
+
+  function schedule(el) {
+    clearTimeout(timer);
+    timer = setTimeout(() => check(el), DEBOUNCE_MS);
   }
 
   document.addEventListener(
     "input",
     (e) => {
-      const el = e.target;
-      if (!isTextField(el)) return;
-      clearTimeout(timer);
-      timer = setTimeout(() => check(el), DEBOUNCE_MS);
+      const el = getField(e.target);
+      if (el) schedule(el);
+    },
+    true
+  );
+
+  // Algunos sitios (WhatsApp) vacían la caja al enviar sin avisar con "input".
+  document.addEventListener(
+    "keyup",
+    (e) => {
+      const el = getField(e.target);
+      if (el && isEditableDiv(el)) schedule(el);
     },
     true
   );
