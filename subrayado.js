@@ -150,15 +150,22 @@ var CorrectorSubrayado = (() => {
     let pos = 0;
     for (const m of matches) {
       if (m.length < 1 || m.offset < pos) continue; // se salta lo que se traslapa
-      if (m.offset > pos) {
-        e.contenido.appendChild(document.createTextNode(text.slice(pos, m.offset)));
+      let ini = m.offset;
+      let fin = m.offset + m.length;
+      // errores muy cortos (una coma, un punto): se amplía un carácter a cada lado
+      if (m.length < 3 && !/\p{L}/u.test(text.substr(m.offset, m.length))) {
+        if (ini > pos && text[ini - 1] !== "\n") ini--;
+        if (fin < text.length && text[fin] !== "\n") fin++;
+      }
+      if (ini > pos) {
+        e.contenido.appendChild(document.createTextNode(text.slice(pos, ini)));
       }
       const span = document.createElement("span");
       span.className = "e " + (tipoDe(m) === "orto" ? "orto" : "otro");
-      span.textContent = text.substr(m.offset, m.length);
+      span.textContent = text.slice(ini, fin);
       e.contenido.appendChild(span);
-      e.spans.push({ m, span });
-      pos = m.offset + m.length;
+      e.spans.push({ m, span, ini, fin });
+      pos = fin;
     }
     if (pos < text.length) {
       e.contenido.appendChild(document.createTextNode(text.slice(pos)));
@@ -174,7 +181,7 @@ var CorrectorSubrayado = (() => {
     const e = entradas.get(el);
     if (!e || !e.visible) return null;
     for (const s of e.spans) {
-      if (idx >= s.m.offset && idx <= s.m.offset + s.m.length) {
+      if (idx >= s.ini && idx <= s.fin) {
         const rects = s.span.getClientRects();
         const rect = rects.length ? rects[0] : s.span.getBoundingClientRect();
         return { m: s.m, rect };
