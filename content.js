@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "1.2.2";
+  const VERSION = "1.3.0";
   const DEBOUNCE_MS = 600;
   const MAX_SUGGESTIONS = 5;
   const MAX_CHARS = 20000;
@@ -13,6 +13,65 @@
   let lastEl = null;
   let lastText = "";
   const els = {};
+
+  /* ---------- Palabras ignoradas ---------- */
+
+  const KEY_IGNORADAS = "ignoradas";
+  let ignoradas = new Set();
+
+  function cargarIgnoradas() {
+    try {
+      chrome.storage.local.get([KEY_IGNORADAS], (r) => {
+        if (chrome.runtime.lastError) return;
+        ignoradas = new Set(
+          Array.isArray(r[KEY_IGNORADAS]) ? r[KEY_IGNORADAS] : []
+        );
+      });
+    } catch (e) {}
+  }
+  cargarIgnoradas();
+
+  try {
+    chrome.storage.onChanged.addListener((cambios, area) => {
+      if (area === "local" && cambios[KEY_IGNORADAS]) {
+        ignoradas = new Set(cambios[KEY_IGNORADAS].newValue || []);
+        lastText = ""; // fuerza una nueva revisión
+      }
+    });
+  } catch (e) {}
+
+  function esPalabraDesconocida(m) {
+    return (
+      (m.type && m.type.typeName === "UnknownWord") ||
+      (m.rule &&
+        typeof m.rule.id === "string" &&
+        m.rule.id.startsWith("MORFOLOGIK"))
+    );
+  }
+
+  function puedeIgnorarse(text, m) {
+    return (
+      esPalabraDesconocida(m) &&
+      /^[\p{L}\p{N}'’-]+$/u.test(text.substr(m.offset, m.length))
+    );
+  }
+
+  function filtrarIgnoradas(text, matches) {
+    return matches.filter(
+      (m) =>
+        !(
+          puedeIgnorarse(text, m) &&
+          ignoradas.has(text.substr(m.offset, m.length).toLowerCase())
+        )
+    );
+  }
+
+  function ignorarPalabra(palabra) {
+    ignoradas.add(palabra.toLowerCase());
+    try {
+      chrome.storage.local.set({ [KEY_IGNORADAS]: Array.from(ignoradas) });
+    } catch (e) {}
+  }
 
   /* ---------- Panel ---------- */
 
@@ -33,6 +92,8 @@
         .msg{color:#4b5563;margin:2px 0 4px;}
         .sug{margin:2px 4px 2px 0;padding:2px 8px;border:1px solid #2563eb;background:#eff6ff;color:#1d4ed8;border-radius:12px;cursor:pointer;font-size:12px;}
         .sug:hover{background:#dbeafe;}
+        .ign{margin:2px 4px 2px 0;padding:2px 8px;border:1px solid #6b7280;background:#f9fafb;color:#4b5563;border-radius:12px;cursor:pointer;font-size:12px;}
+        .ign:hover{background:#f3f4f6;}
         .ok{color:#15803d;}
         .foot{text-align:center;font-size:11px;color:#9ca3af;padding:4px 0 6px;border-top:1px solid #e5e7eb;}
       </style>
@@ -270,6 +331,21 @@
         });
         item.appendChild(b);
       }
+      if (puedeIgnorarse(text, m)) {
+        const ig = document.createElement("button");
+        ig.className = "ign";
+        ig.textContent = "Ignorar";
+        ig.title = "No volver a marcar esta palabra";
+        ig.addEventListener("mousedown", (e) => e.preventDefault());
+        ig.addEventListener("click", () => {
+          ignorarPalabra(word);
+          item.remove();
+          if (!els.body.querySelector(".item")) hidePanel();
+          lastText = "";
+          schedule(el, 150);
+        });
+        item.appendChild(ig);
+      }
       els.body.appendChild(item);
     }
   }
@@ -305,7 +381,8 @@
         }
         lastEl = el;
         lastText = text;
-        render(el, text, typeof CorrectorRules !== "undefined" ? CorrectorRules.merge(text, resp.matches) : resp.matches);
+        const todas = typeof CorrectorRules !== "undefined" ? CorrectorRules.merge(text, resp.matches) : resp.matches;
+        render(el, text, filtrarIgnoradas(text, todas));
       });
     } catch (e) {
       // pasa cuando se recarga la extensión y la página quedó con la versión vieja
