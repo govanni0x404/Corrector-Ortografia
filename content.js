@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "1.1.1";
+  const VERSION = "1.1.2";
   const DEBOUNCE_MS = 600;
   const MAX_SUGGESTIONS = 5;
   const MAX_CHARS = 20000;
@@ -217,6 +217,8 @@
         range.insertNode(document.createTextNode(replacement));
         el.dispatchEvent(new Event("input", { bubbles: true }));
       }
+      // Algunos editores (WhatsApp) no avisan con "input": se revisa de nuevo solo.
+      schedule(el, 150);
       return;
     }
 
@@ -261,9 +263,11 @@
         b.textContent = r.value;
         // evita que el clic le quite el foco a la caja de texto
         b.addEventListener("mousedown", (e) => e.preventDefault());
-        b.addEventListener("click", () =>
-          applyFix(el, m.offset, m.length, word, r.value)
-        );
+        b.addEventListener("click", () => {
+          applyFix(el, m.offset, m.length, word, r.value);
+          item.remove();
+          if (!els.body.querySelector(".item")) hidePanel();
+        });
         item.appendChild(b);
       }
       els.body.appendChild(item);
@@ -309,9 +313,9 @@
     }
   }
 
-  function schedule(el) {
+  function schedule(el, delay = DEBOUNCE_MS) {
     clearTimeout(timer);
-    timer = setTimeout(() => check(el), DEBOUNCE_MS);
+    timer = setTimeout(() => check(el), delay);
   }
 
   document.addEventListener(
