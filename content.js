@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "1.6.1";
+  const VERSION = "1.7.0";
   const DEBOUNCE_MS = 600;
   const MAX_SUGGESTIONS = 5;
   const MAX_CHARS = 20000;
@@ -31,6 +31,10 @@
     .ign{margin:2px 4px 2px 0;padding:2px 8px;border:1px solid #6b7280;background:#f9fafb;color:#4b5563;border-radius:12px;cursor:pointer;font-size:12px;}
     .ign:hover{background:#f3f4f6;}
     .ok{color:#15803d;}
+    .pill{border:1px solid #15803d;background:#f0fdf4;color:#15803d;border-radius:14px;padding:4px 12px;font:600 12px/1.4 system-ui,sans-serif;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.15);}
+    .pill:hover{background:#dcfce7;}
+    .todo{margin:6px 0 2px;padding:4px 10px;border:1px solid #15803d;background:#f0fdf4;color:#15803d;border-radius:12px;cursor:pointer;font-size:12px;font-weight:600;}
+    .todo:hover{background:#dcfce7;}
     .foot{text-align:center;font-size:11px;color:#9ca3af;padding:4px 0 6px;border-top:1px solid #e5e7eb;}
   `;
 
@@ -200,6 +204,15 @@
     ensureBurbuja();
     burbuja.body.textContent = "";
     burbuja.body.appendChild(crearTarjeta(el, text, m, ocultarBurbuja));
+    const nTodo = candidatos(el).length;
+    if (nTodo >= 2) {
+      const bt = document.createElement("button");
+      bt.className = "todo";
+      bt.textContent = "✔ Corregir todo (" + nTodo + ")";
+      bt.addEventListener("mousedown", (e) => e.preventDefault());
+      bt.addEventListener("click", () => corregirTodo(el));
+      burbuja.body.appendChild(bt);
+    }
     const h = burbuja.host;
     h.style.display = "block";
     const left = Math.max(
@@ -227,6 +240,7 @@
   }
 
   function ocultarSubrayado(el) {
+    ocultarAccion();
     if (typeof CorrectorSubrayado !== "undefined" && el) {
       CorrectorSubrayado.ocultar(el);
     }
@@ -425,6 +439,153 @@
     } catch (e) {}
   }
 
+  /* ---------- Corregir todo ---------- */
+
+  let accion = null; // botón flotante "Corregir todo"
+  let accionEl = null;
+
+  const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // Palabra desconocida con mayúscula: probablemente un nombre propio.
+  function esProbableNombre(text, m) {
+    if (!esPalabraDesconocida(m)) return false;
+    return /^\p{Lu}/u.test(text.substr(m.offset, m.length));
+  }
+
+  // Errores que "Corregir todo" arreglará: tienen sugerencia y no parecen nombres.
+  function candidatos(el) {
+    if (el !== lastEl) return [];
+    const { text } = readField(el);
+    if (text !== lastText) return [];
+    const out = [];
+    let fin = 0;
+    for (const m of lastMatches) {
+      if (m.offset < fin) continue; // se salta lo que se traslapa
+      const rep = m.replacements && m.replacements[0];
+      if (!rep || typeof rep.value !== "string") continue;
+      if (esProbableNombre(text, m)) continue;
+      out.push({
+        offset: m.offset,
+        length: m.length,
+        word: text.substr(m.offset, m.length),
+        value: rep.value
+      });
+      fin = m.offset + m.length;
+    }
+    return out;
+  }
+
+  // textarea / input: se cambia todo el texto de una sola vez (un solo Ctrl+Z).
+  function corregirTodoCampo(el, lista) {
+    const antes = el.value;
+    const scrollTop = el.scrollTop;
+    const cursor = el.selectionStart || 0;
+    let nuevo = antes;
+    let desplazamiento = 0;
+    for (const it of lista) {
+      // la lista viene ordenada de atrás hacia adelante
+      nuevo =
+        nuevo.slice(0, it.offset) + it.value + nuevo.slice(it.offset + it.length);
+      if (it.offset < cursor) desplazamiento += it.value.length - it.length;
+    }
+    el.focus();
+    el.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("insertText", false, nuevo);
+    } catch (e) {}
+    if (!ok || el.value !== nuevo) setValue(el, nuevo);
+    try {
+      const pos = Math.max(0, Math.min(nuevo.length, cursor + desplazamiento));
+      el.setSelectionRange(pos, pos);
+    } catch (e) {}
+    el.scrollTop = scrollTop;
+  }
+
+  async function corregirTodo(el) {
+    const lista = candidatos(el);
+    if (!lista.length) {
+      lastText = "";
+      check(el);
+      return;
+    }
+    ocultarBurbuja();
+    ocultarSubrayado(el);
+    lista.sort((a, b) => b.offset - a.offset); // de atrás hacia adelante
+
+    if (!isEditableDiv(el)) {
+      corregirTodoCampo(el, lista);
+    } else {
+      // Cajas contenteditable: una corrección a la vez, esperando a que el editor se actualice.
+      for (const it of lista) {
+        applyFix(el, it.offset, it.length, it.word, it.value);
+        await esperar(80);
+      }
+    }
+    lastText = "";
+    schedule(el, 150);
+  }
+
+  function ensureAccion() {
+    if (accion) return;
+    const h = document.createElement("div");
+    h.style.cssText =
+      "all:initial;position:fixed;z-index:2147483647;display:none;";
+    const shadow = h.attachShadow({ mode: "open" });
+    shadow.innerHTML = `<style>${ESTILO}</style><button class="pill"></button>`;
+    const btn = shadow.querySelector(".pill");
+    btn.addEventListener("mousedown", (e) => e.preventDefault());
+    btn.addEventListener("click", () => {
+      if (accionEl) corregirTodo(accionEl);
+    });
+    accion = { host: h, btn };
+    document.documentElement.appendChild(h);
+  }
+
+  function posicionarAccion(el) {
+    if (!accion) return;
+    const r = el.getBoundingClientRect();
+    const h = accion.host;
+    h.style.left = "auto";
+    h.style.right = Math.max(8, window.innerWidth - r.right) + "px";
+    if (r.top > 50) {
+      h.style.top = "auto";
+      h.style.bottom = window.innerHeight - r.top + 6 + "px";
+    } else {
+      h.style.bottom = "auto";
+      h.style.top = Math.min(r.bottom + 6, window.innerHeight - 40) + "px";
+    }
+  }
+
+  function ocultarAccion() {
+    if (accion) accion.host.style.display = "none";
+    accionEl = null;
+  }
+
+  function actualizarAccion(el) {
+    const n = candidatos(el).length;
+    if (n < 2) {
+      ocultarAccion();
+      return;
+    }
+    ensureAccion();
+    accionEl = el;
+    accion.btn.textContent = "✔ Corregir todo (" + n + ")";
+    accion.host.style.display = "block";
+    posicionarAccion(el);
+  }
+
+  window.addEventListener(
+    "scroll",
+    () => {
+      if (accionEl) posicionarAccion(accionEl);
+    },
+    true
+  );
+  window.addEventListener("resize", () => {
+    if (accionEl) posicionarAccion(accionEl);
+  });
+
   /* ---------- Tarjetas y panel ---------- */
 
   // Una tarjeta = un error con sus sugerencias. alUsar() se llama al usarla.
@@ -488,6 +649,15 @@
       });
       els.body.appendChild(item);
     }
+    const nTodo = candidatos(el).length;
+    if (nTodo >= 2) {
+      const bt = document.createElement("button");
+      bt.className = "todo";
+      bt.textContent = "✔ Corregir todo (" + nTodo + ")";
+      bt.addEventListener("mousedown", (e) => e.preventDefault());
+      bt.addEventListener("click", () => corregirTodo(el));
+      els.body.appendChild(bt);
+    }
   }
 
   /* ---------- Revisar ---------- */
@@ -509,7 +679,7 @@
     }
     if (el === lastEl && text === lastText) {
       // nada nuevo que revisar; solo se vuelve a dibujar el subrayado
-      subrayar(el, text, lastMatches);
+      if (subrayar(el, text, lastMatches)) actualizarAccion(el);
       return;
     }
 
@@ -542,8 +712,13 @@
         lastMatches = lista;
         if (readField(el).text !== text) return; // cambió mientras se revisaba
         const pintado = subrayar(el, text, lista);
-        if (pintado) hidePanel();
-        else render(el, text, lista);
+        if (pintado) {
+          hidePanel();
+          actualizarAccion(el);
+        } else {
+          render(el, text, lista);
+          ocultarAccion();
+        }
       });
     } catch (e) {
       showMessage(el, "La extensión se actualizó. Recarga esta página (F5).");
