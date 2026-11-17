@@ -4,24 +4,44 @@
 <meta charset="utf-8">
 <title>Corrector de ortografía</title>
 <style>
-  body{width:300px;margin:0;font:13px/1.4 system-ui,sans-serif;color:#1f2937;}
+  body{width:320px;margin:0;font:13px/1.4 system-ui,sans-serif;color:#1f2937;}
   h1{font-size:14px;margin:0;padding:10px 12px;border-bottom:1px solid #e5e7eb;}
-  #lista{max-height:260px;overflow:auto;padding:6px 12px;}
+  h2{font-size:11px;margin:0;padding:8px 12px 4px;color:#4b5563;text-transform:uppercase;letter-spacing:.04em;}
+  .bloque{border-bottom:1px solid #e5e7eb;padding-bottom:6px;}
+  .sitio{padding:4px 12px;}
+  .sitio label{display:flex;align-items:center;gap:8px;cursor:pointer;}
+  .lista{max-height:130px;overflow:auto;padding:0 12px;}
   .fila{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #f3f4f6;}
   .quitar{border:1px solid #dc2626;background:#fef2f2;color:#b91c1c;border-radius:12px;padding:2px 8px;cursor:pointer;font-size:12px;}
-  .vacio{color:#6b7280;padding:8px 0;}
-  .agregar{display:flex;gap:6px;padding:8px 12px;border-top:1px solid #e5e7eb;}
+  .activar{border:1px solid #15803d;background:#f0fdf4;color:#15803d;border-radius:12px;padding:2px 8px;cursor:pointer;font-size:12px;}
+  .vacio{color:#6b7280;padding:4px 0;}
+  .agregar{display:flex;gap:6px;padding:8px 12px 0;}
   .agregar input{flex:1;padding:4px 6px;}
-  #version{text-align:center;font-size:11px;color:#9ca3af;padding:4px 0 8px;}
+  #version{text-align:center;font-size:11px;color:#9ca3af;padding:6px 0 8px;}
 </style>
 </head>
 <body>
-  <h1>Palabras ignoradas</h1>
-  <div id="lista"></div>
-  <form class="agregar" id="form">
-    <input id="nueva" placeholder="Agregar palabra..." autocomplete="off">
-    <button type="submit">Agregar</button>
-  </form>
+  <h1>Corrector de ortografía</h1>
+
+  <div class="bloque">
+    <h2>Este sitio</h2>
+    <div class="sitio" id="sitioActual"></div>
+  </div>
+
+  <div class="bloque">
+    <h2>Sitios desactivados</h2>
+    <div class="lista" id="listaSitios"></div>
+  </div>
+
+  <div class="bloque">
+    <h2>Palabras ignoradas</h2>
+    <div class="lista" id="lista"></div>
+    <form class="agregar" id="form">
+      <input id="nueva" placeholder="Agregar palabra..." autocomplete="off">
+      <button type="submit">Agregar</button>
+    </form>
+  </div>
+
   <div id="version"></div>
   <script src="popup.js"></script>
 </body>

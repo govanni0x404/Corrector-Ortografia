@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Corrector de ortografía",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Marca faltas de ortografía y redacción y sugiere correcciones usando LanguageTool local.",
   "host_permissions": [
     "http://localhost:8010/*"
@@ -31,7 +31,8 @@
     }
   },
   "permissions": [
-    "storage"
+    "storage",
+    "activeTab"
   ],
   "action": {
     "default_title": "Corrector de ortografía",

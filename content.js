@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "1.3.0";
+  const VERSION = "1.4.0";
   const DEBOUNCE_MS = 600;
   const MAX_SUGGESTIONS = 5;
   const MAX_CHARS = 20000;
@@ -72,6 +72,27 @@
       chrome.storage.local.set({ [KEY_IGNORADAS]: Array.from(ignoradas) });
     } catch (e) {}
   }
+
+  /* ---------- Sitios desactivados ---------- */
+
+  const KEY_SITIOS = "sitiosApagados";
+  const SITIO = location.hostname.replace(/^www\./, "");
+  let sitioApagado = false;
+
+  try {
+    chrome.storage.local.get([KEY_SITIOS], (r) => {
+      if (chrome.runtime.lastError) return;
+      const arr = Array.isArray(r[KEY_SITIOS]) ? r[KEY_SITIOS] : [];
+      sitioApagado = arr.includes(SITIO);
+    });
+    chrome.storage.onChanged.addListener((cambios, area) => {
+      if (area === "local" && cambios[KEY_SITIOS]) {
+        sitioApagado = (cambios[KEY_SITIOS].newValue || []).includes(SITIO);
+        if (sitioApagado) hidePanel();
+        else lastText = ""; // al reactivar, se revisa de nuevo
+      }
+    });
+  } catch (e) {}
 
   /* ---------- Panel ---------- */
 
@@ -353,6 +374,10 @@
   /* ---------- Revisar ---------- */
 
   function check(el) {
+    if (sitioApagado) {
+      hidePanel();
+      return;
+    }
     const { text } = readField(el);
     if (!text.trim()) {
       lastEl = el;
