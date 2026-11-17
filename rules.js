@@ -135,6 +135,15 @@ var CorrectorRules = (() => {
         message: "Dos puntos seguidos: ¿quisiste escribir puntos suspensivos?",
         replacements: [{ value: "..." }, { value: "." }]
       })
+    },
+    {
+      re: /(?<=\p{L}) pero(?=\s)/gu,
+      hacer: (m) => ({
+        offset: m.index,
+        length: m[0].length,
+        message: "Antes de ‘pero’ suele ir una coma.",
+        replacements: [{ value: ", pero" }]
+      })
     }
   ];
 
