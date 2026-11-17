@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "1.6.0";
+  const VERSION = "1.6.1";
   const DEBOUNCE_MS = 600;
   const MAX_SUGGESTIONS = 5;
   const MAX_CHARS = 20000;
