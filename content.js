@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "1.5.1";
+  const VERSION = "1.6.0";
   const DEBOUNCE_MS = 600;
   const MAX_SUGGESTIONS = 5;
   const MAX_CHARS = 20000;
@@ -227,20 +227,27 @@
   }
 
   function ocultarSubrayado(el) {
-    if (
-      typeof CorrectorSubrayado !== "undefined" &&
-      el &&
-      !isEditableDiv(el)
-    ) {
+    if (typeof CorrectorSubrayado !== "undefined" && el) {
       CorrectorSubrayado.ocultar(el);
     }
   }
 
+  // Devuelve true si se pudo dibujar el subrayado (entonces el panel no hace falta).
   function subrayar(el, text, matches) {
-    if (typeof CorrectorSubrayado === "undefined" || isEditableDiv(el)) return;
+    if (typeof CorrectorSubrayado === "undefined") return false;
+    const actual = readField(el);
     // si el texto cambió mientras se revisaba, no se dibuja nada
-    if (readField(el).text !== text) return;
-    CorrectorSubrayado.pintar(el, text, matches, tipoDe);
+    if (actual.text !== text) return false;
+    if (isEditableDiv(el)) {
+      return CorrectorSubrayado.pintarEditable(
+        el,
+        actual.segs,
+        text,
+        matches,
+        tipoDe
+      );
+    }
+    return CorrectorSubrayado.pintar(el, text, matches, tipoDe);
   }
 
   /* ---------- Detectar y leer campos de texto ---------- */
@@ -311,6 +318,41 @@
       return { text: text.slice(0, MAX_CHARS), segs };
     }
     return { text: el.value.slice(0, MAX_CHARS), segs: null };
+  }
+
+  /* ---------- Posición del cursor dentro del texto ---------- */
+
+  function posicionEnTexto(segs, node, offset) {
+    if (!node) return null;
+    if (node.nodeType === 3) {
+      const s = segs.find((x) => x.node === node);
+      return s ? s.start + offset : null;
+    }
+    const hijo = node.childNodes[offset];
+    if (hijo) {
+      const s = segs.find((x) => hijo === x.node || hijo.contains(x.node));
+      return s ? s.start : null;
+    }
+    const dentro = segs.filter((x) => node.contains(x.node));
+    if (!dentro.length) return null;
+    const ult = dentro[dentro.length - 1];
+    return ult.start + ult.len;
+  }
+
+  function indiceDeCursor(el) {
+    if (!isEditableDiv(el)) {
+      return el.selectionStart != null && el.selectionStart === el.selectionEnd
+        ? el.selectionStart
+        : null;
+    }
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !sel.isCollapsed) return null;
+    if (!el.contains(sel.anchorNode)) return null;
+    return posicionEnTexto(
+      extractContent(el).segs,
+      sel.anchorNode,
+      sel.anchorOffset
+    );
   }
 
   /* ---------- Aplicar una corrección ---------- */
@@ -498,8 +540,10 @@
         lastEl = el;
         lastText = text;
         lastMatches = lista;
-        render(el, text, lista);
-        subrayar(el, text, lista);
+        if (readField(el).text !== text) return; // cambió mientras se revisaba
+        const pintado = subrayar(el, text, lista);
+        if (pintado) hidePanel();
+        else render(el, text, lista);
       });
     } catch (e) {
       showMessage(el, "La extensión se actualizó. Recarga esta página (F5).");
@@ -541,12 +585,12 @@
     (e) => {
       if (e.target === (burbuja && burbuja.host) || e.target === host) return;
       const el = getField(e.target);
-      if (!el || isEditableDiv(el)) {
+      if (!el) {
         ocultarBurbuja();
         return;
       }
-      const idx = el.selectionStart;
-      if (idx == null || idx !== el.selectionEnd) {
+      const idx = indiceDeCursor(el);
+      if (idx == null) {
         ocultarBurbuja();
         return;
       }
